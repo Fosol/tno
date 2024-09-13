@@ -109,7 +109,7 @@ export const TimeLogSection: React.FC<ITimeLogSectionProps> = ({ prepTimeRequire
         hide={toggle}
         isShowing={isShowing}
         headerText="Prep Time Log"
-        body={<TimeLogTable />}
+        component={<TimeLogTable />}
         customButtons={
           <Button variant={ButtonVariant.secondary} onClick={toggle}>
             Close
