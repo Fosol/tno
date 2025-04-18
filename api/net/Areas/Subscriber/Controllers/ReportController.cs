@@ -170,6 +170,8 @@ public class ReportController : ControllerBase
         var user = _impersonate.GetCurrentUser();
 
         var report = _reportService.FindById(id) ?? throw new NoContentException();
+
+        _logger.LogInformation("User Information, User: {user}:{key}, Report Owner: {owner}", user.Username, user.Key, report.OwnerId);
         if (report.OwnerId != user.Id) throw new NotAuthorizedException("Not authorized to view this report");
 
         var instances = _reportService.GetLatestInstances(id, user.Id);
