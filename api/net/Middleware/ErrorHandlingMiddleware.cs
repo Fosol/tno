@@ -102,7 +102,7 @@ namespace TNO.API.Middleware
             else if (ex is NotAuthorizedException)
             {
                 code = HttpStatusCode.Forbidden;
-                message = "User is not authorized to perform this action.";
+                message = String.IsNullOrWhiteSpace(ex.Message) ? "User is not authorized to perform this action." : ex.Message;
 
                 _logger.LogWarning(ex, "Not authorized error.  {error}", ex.Message);
             }

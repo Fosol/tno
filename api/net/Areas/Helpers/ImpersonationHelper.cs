@@ -67,6 +67,8 @@ public class ImpersonationHelper : IImpersonationHelper
         var isAdmin = user.Roles.Split(',').Contains($"[{ClientRole.Administrator.GetName()}]");
         var impersonate = user.Preferences.GetElementValue<string?>(".impersonate");
 
+        this.Logger.LogInformation("Impersonate Information. User:{user} Impersonate:{impersonate}", username, impersonate);
+
         // If the user is an admin and has a configured impersonation, return that user instead.
         if (isAdmin && !String.IsNullOrWhiteSpace(impersonate))
         {
