@@ -1,0 +1,47 @@
+# Station specific configuration for CKNW. Adjust as needed.
+name: CKNW
+sample_rate: 16000
+transcription:
+  provider: azure_speech
+  diarization: true
+  max_speakers: 10
+  language: en-CA
+text:
+  chunk_size_s: 3.0
+  chunk_overlap_ratio: 0.5
+  heuristic_boundary_weight: 0.2
+  keyword_categories:
+    "(?i)traffic": Traffic
+    "(?i)weather": Weather
+    "(?i)sponsor": Ad
+    "(?i)commercial": Ad
+  llm_segmentation: true
+  llm_model: gpt-4o-mini
+  system_prompt: |
+    You are the CKNW News Segment Tool. Transcripts are listed as numbered sentences with precise
+    timestamps. Identify where new stories begin so ffmpeg can cut clean clips. The top news stories are often stated at the beginning of the transcript. Keep boundaries
+    chronological, never invent timestamps, and respond only with the requested JSON.
+  max_stories: 15
+  llm_prompt: |
+    Review the transcript (numbered sentences) and return up to {{max_clips}} boundary objects where a
+    new story begins. Output ONLY JSON in this shape:
+    {
+      "boundaries": [
+        {"index": 12, "title": "slug", "summary": "recap", "score": 0.82}
+      ]
+    }
+    Requirements:
+    - index matches the numbered sentence (1-based) where the story starts.
+    - score ranges 0-1 and reflects confidence.
+    - Keep boundaries chronological, never duplicate indices, and do not invent timestamps.
+    - Use the provided timestamps/lines for context; ignore anything not in the transcript.
+
+    Transcript:
+    {{transcript}}
+heuristics:
+  keyword_patterns:
+    - "(?i)we'll have more on that"
+    - "(?i)back after the break"
+    - "(?i)this is Mike Smith"
+    - "(?i)you're listening to"
+    - "(?i)CKNW"
