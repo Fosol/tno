@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Linq;
 using TNO.Services.AutoClipper.Audio;
 using TNO.Services.AutoClipper.Azure;
 using TNO.Services.AutoClipper.Config;
@@ -62,11 +63,26 @@ public class ClipProcessingPipeline
             PromptCharacterLimit = profile.Text.PromptCharacterLimit,
             MaxStories = profile.Text.MaxStories,
             KeywordPatterns = profile.Heuristics.KeywordPatterns?.ToArray(),
+
+            HeuristicPatternEntries = profile.Heuristics.PatternEntries?
+                .Where(p => p != null && !string.IsNullOrWhiteSpace(p.Pattern))
+                .Select(p => new HeuristicPatternSetting
+                {
+                    Pattern = p.Pattern!,
+                    Weight = p.Weight,
+                    Category = string.IsNullOrWhiteSpace(p.Category) ? null : p.Category,
+                    Note = p.Note
+                })
+                .ToArray(),
             HeuristicBoundaryWeight = profile.Text.HeuristicBoundaryWeight,
             KeywordCategories = profile.Text.KeywordCategories?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
         };
     }
 }
+
+
+
+
 
 
 

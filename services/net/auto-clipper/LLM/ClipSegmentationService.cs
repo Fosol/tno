@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Text;
@@ -113,7 +114,7 @@ Transcript:
             ? overrides!.PromptOverride!
             : string.IsNullOrWhiteSpace(_options.LlmPrompt) ? DefaultPrompt : _options.LlmPrompt;
         var includesHeuristicPlaceholder = template.Contains("{{heuristic_notes}}");
-        var limit = overrides?.PromptCharacterLimit ?? Math.Max(1000, _options.LlmPromptCharacterLimit);
+        var limit = ResolvePromptLimit(overrides?.PromptCharacterLimit);
         var transcriptBody = BuildPromptTranscript(transcript, limit);
         var heuristicNotes = BuildHeuristicNotes(heuristicHits, transcript);
 
@@ -133,7 +134,15 @@ Transcript:
         return prompt;
     }
 
-    private string BuildPromptTranscript(IReadOnlyList<TimestampedTranscript> transcript, int limit)
+    private int? ResolvePromptLimit(int? overrideLimit)
+    {
+        if (overrideLimit.HasValue)
+            return overrideLimit.Value > 0 ? overrideLimit.Value : null;
+
+        return _options.LlmPromptCharacterLimit > 0 ? _options.LlmPromptCharacterLimit : null;
+    }
+
+    private string BuildPromptTranscript(IReadOnlyList<TimestampedTranscript> transcript, int? limit)
     {
         var builder = new StringBuilder();
         builder.AppendLine("Sentences:");
@@ -142,7 +151,7 @@ Transcript:
             var sentence = transcript[i];
             if (string.IsNullOrWhiteSpace(sentence.Text)) continue;
             var line = $"{i + 1}. {FormatTimestamp(sentence.Start)} --> {FormatTimestamp(sentence.End)} :: {sentence.Text.Trim()}";
-            if (builder.Length + line.Length > limit)
+            if (limit.HasValue && builder.Length + line.Length > limit.Value)
                 break;
             builder.AppendLine(line);
         }
@@ -151,7 +160,7 @@ Transcript:
         builder.AppendLine("Paragraphs:");
         var paragraphNumber = 1;
         var index = 0;
-        while (index < transcript.Count && builder.Length < limit)
+        while (index < transcript.Count && (!limit.HasValue || builder.Length < limit.Value))
         {
             var start = index;
             var end = Math.Min(index + ParagraphSentenceCount, transcript.Count);
@@ -166,7 +175,7 @@ Transcript:
             if (sentences.Count > 0)
             {
                 var line = $"Paragraph {paragraphNumber} (sentences {start + 1}-{end}): {string.Join(" / ", sentences)}";
-                if (builder.Length + line.Length > limit) break;
+                if (limit.HasValue && builder.Length + line.Length > limit.Value) break;
                 builder.AppendLine(line);
                 paragraphNumber++;
             }
@@ -185,23 +194,35 @@ Transcript:
         {
             var sentence = transcript[hit.Index];
             var snippet = string.IsNullOrWhiteSpace(sentence.Text) ? string.Empty : sentence.Text.Trim();
-            sb.AppendLine($"Sentence {hit.Index + 1} ({FormatTimestamp(sentence.Start)}): pattern '{hit.Pattern}' -> {snippet}");
+            var meta = BuildHeuristicMeta(hit);
+            sb.AppendLine($"Sentence {hit.Index + 1} ({FormatTimestamp(sentence.Start)}): '{hit.Pattern}'{meta} -> {snippet}");
         }
         return sb.ToString().Trim();
     }
 
+    private static string BuildHeuristicMeta(HeuristicHit hit)
+    {
+        var parts = new List<string> { $"w={hit.Weight:0.00}" };
+        if (!string.IsNullOrWhiteSpace(hit.Category)) parts.Add($"cat={hit.Category}");
+        if (!string.IsNullOrWhiteSpace(hit.Note)) parts.Add(hit.Note!);
+        return parts.Count == 0 ? string.Empty : $" [{string.Join(", ", parts)}]";
+    }
     private IReadOnlyList<HeuristicHit> BuildHeuristicHits(IReadOnlyList<TimestampedTranscript> transcript, ClipSegmentationSettings? settings)
     {
         if (transcript == null || transcript.Count == 0) return Array.Empty<HeuristicHit>();
-        if (settings?.KeywordPatterns == null || settings.KeywordPatterns.Count == 0) return Array.Empty<HeuristicHit>();
-        var weight = settings.HeuristicBoundaryWeight ?? 0;
-        if (weight <= 0) return Array.Empty<HeuristicHit>();
+        var patternEntries = settings?.HeuristicPatternEntries;
+        var legacyPatterns = settings?.KeywordPatterns;
+        var baseWeight = settings?.HeuristicBoundaryWeight ?? 0;
+        var hasEntryOverrides = patternEntries != null && patternEntries.Count > 0;
+        if (!hasEntryOverrides && (legacyPatterns == null || legacyPatterns.Count == 0)) return Array.Empty<HeuristicHit>();
+        if (!hasEntryOverrides && baseWeight <= 0) return Array.Empty<HeuristicHit>();
 
         var hits = new List<HeuristicHit>();
-        var categoryLookup = settings.KeywordCategories ?? new Dictionary<string, string>();
-        foreach (var pattern in settings.KeywordPatterns)
+        var categoryLookup = settings?.KeywordCategories ?? new Dictionary<string, string>();
+
+        void AddMatches(string pattern, double weight, string? category, string? note)
         {
-            if (string.IsNullOrWhiteSpace(pattern)) continue;
+            if (string.IsNullOrWhiteSpace(pattern) || weight <= 0) return;
             Regex regex;
             try
             {
@@ -210,23 +231,43 @@ Transcript:
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Invalid heuristic pattern: {Pattern}", pattern);
-                continue;
+                return;
             }
-
-            var category = categoryLookup.TryGetValue(pattern, out var mappedCategory) ? mappedCategory : null;
 
             for (var i = 0; i < transcript.Count; i++)
             {
                 var textValue = transcript[i].Text;
                 if (string.IsNullOrWhiteSpace(textValue)) continue;
                 if (regex.IsMatch(textValue))
-                    hits.Add(new HeuristicHit(i, pattern, weight, category));
+                    hits.Add(new HeuristicHit(i, pattern, weight, category, note));
+            }
+        }
+
+        if (hasEntryOverrides)
+        {
+            foreach (var entry in patternEntries!)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.Pattern)) continue;
+                var weight = entry.Weight ?? baseWeight;
+                if (weight <= 0) continue;
+                var category = !string.IsNullOrWhiteSpace(entry.Category)
+                    ? entry.Category
+                    : (categoryLookup.TryGetValue(entry.Pattern, out var mapped) ? mapped : null);
+                AddMatches(entry.Pattern, weight, category, entry.Note);
+            }
+        }
+        else if (legacyPatterns != null)
+        {
+            foreach (var pattern in legacyPatterns)
+            {
+                if (string.IsNullOrWhiteSpace(pattern)) continue;
+                var category = categoryLookup.TryGetValue(pattern, out var mappedCategory) ? mappedCategory : null;
+                AddMatches(pattern, baseWeight, category, null);
             }
         }
 
         return hits;
     }
-
     private string BuildRequestUri()
     {
         var baseUrl = _options.LlmApiUrl?.TrimEnd('/') ?? string.Empty;
@@ -359,7 +400,7 @@ Transcript:
 
     private sealed record BoundaryCandidate(int Index, string Title, string Summary, double Score, bool IsHeuristic = false, string? Category = null);
 
-    private sealed record HeuristicHit(int Index, string Pattern, double Weight, string? Category);
+    private sealed record HeuristicHit(int Index, string Pattern, double Weight, string? Category, string? Note);
 
     private static string StripCodeFence(string body)
     {
@@ -423,6 +464,15 @@ Transcript:
         return result;
     }
 }
+
+
+
+
+
+
+
+
+
 
 
 

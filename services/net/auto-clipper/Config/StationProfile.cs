@@ -40,4 +40,15 @@ public class StationHeuristicProfile
 {
     public Dictionary<string, double> BoundaryWeights { get; set; } = new();
     public List<string> KeywordPatterns { get; set; } = new();
+    public List<StationHeuristicPattern> PatternEntries { get; set; } = new();
 }
+
+public class StationHeuristicPattern
+{
+    public string Pattern { get; set; } = string.Empty;
+    public double? Weight { get; set; }
+    public string? Category { get; set; }
+    public string? Note { get; set; }
+}
+
+

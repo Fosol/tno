@@ -12,4 +12,14 @@ public class ClipSegmentationSettings
     public IReadOnlyList<string>? KeywordPatterns { get; set; }
     public double? HeuristicBoundaryWeight { get; set; }
     public IReadOnlyDictionary<string, string>? KeywordCategories { get; set; }
+    public IReadOnlyList<HeuristicPatternSetting>? HeuristicPatternEntries { get; set; }
 }
+
+public class HeuristicPatternSetting
+{
+    public string Pattern { get; set; } = string.Empty;
+    public double? Weight { get; set; }
+    public string? Category { get; set; }
+    public string? Note { get; set; }
+}
+

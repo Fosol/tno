@@ -11,6 +11,8 @@ dotnet run --project tools/auto-clipper-harness -- <path-to-media> [language] [o
 `
 
 - Configure Azure keys and LLM settings via .env (see .env.sample).
+- Provide AUTOCLIP_HARNESS_STORAGE_CONNECTION_STRING / AUTOCLIP_HARNESS_STORAGE_CONTAINER so the harness can upload audio for Azure batch transcription.
+- Optional overrides: AUTOCLIP_HARNESS_BATCH_ENDPOINT, _BATCH_VERSION, _BATCH_POLL_SECONDS, _BATCH_TIMEOUT_MINUTES, and _STORAGE_SAS_MINUTES.
 - Station profiles are loaded from services/net/auto-clipper/Config/Stations by default; override with
   AUTOCLIP_HARNESS_STATION_PATH / AUTOCLIP_HARNESS_STATION.
 - Outputs: clip_XX.* media slices, clip_XX.txt transcripts, 	ranscript_full.txt, and

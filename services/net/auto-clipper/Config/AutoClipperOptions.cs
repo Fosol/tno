@@ -13,6 +13,13 @@ public class AutoClipperOptions : ServiceOptions
     public string OldTnoContentTagName { get; set; } = "";
     public string AzureSpeechKey { get; set; } = "";
     public string AzureSpeechRegion { get; set; } = "";
+    public string AzureSpeechBatchEndpoint { get; set; } = string.Empty;
+    public string AzureSpeechBatchApiVersion { get; set; } = "v3.2";
+    public int AzureSpeechBatchPollingIntervalSeconds { get; set; } = 10;
+    public int AzureSpeechBatchTimeoutMinutes { get; set; } = 45;
+    public string AzureSpeechStorageConnectionString { get; set; } = string.Empty;
+    public string AzureSpeechStorageContainer { get; set; } = string.Empty;
+    public int AzureSpeechStorageSasExpiryMinutes { get; set; } = 180;
     public string DefaultTranscriptLanguage { get; set; } = "en-US";
     public int AzureSpeechMaxRetries { get; set; } = 3;
     public int AzureSpeechRetryDelaySeconds { get; set; } = 5;
@@ -25,12 +32,9 @@ public class AutoClipperOptions : ServiceOptions
     public string LlmApiVersion { get; set; } = "2024-07-18";
     public string LlmPrompt { get; set; } = string.Empty;
     public int LlmMaxStories { get; set; } = 5;
-    public int LlmPromptCharacterLimit { get; set; } = 6000;
+    public int LlmPromptCharacterLimit { get; set; } = 0;
     public double LlmTemperature { get; set; } = 0.1;
     public double LlmBoundaryScoreThreshold { get; set; } = 0.55;
 
     public string StationConfigPath { get; set; } = Path.Combine("Config", "Stations");
 }
-
-
-

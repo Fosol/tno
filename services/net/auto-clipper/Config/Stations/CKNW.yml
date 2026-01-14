@@ -3,24 +3,27 @@ name: CKNW
 sample_rate: 16000
 transcription:
   provider: azure_speech
-  diarization: true
+  diarization: false
   max_speakers: 10
   language: en-CA
 text:
   chunk_size_s: 3.0
   chunk_overlap_ratio: 0.5
-  heuristic_boundary_weight: 0.2
+  heuristic_boundary_weight: 0.35
   keyword_categories:
     "(?i)traffic": Traffic
     "(?i)weather": Weather
     "(?i)sponsor": Ad
     "(?i)commercial": Ad
+    "(?i)up next": Promo
+    "(?i)coming up": Promo
   llm_segmentation: true
   llm_model: gpt-4o-mini
   system_prompt: |
-    You are the CKNW News Segment Tool. Transcripts are listed as numbered sentences with precise
-    timestamps. Identify where new stories begin so ffmpeg can cut clean clips. The top news stories are often stated at the beginning of the transcript. Keep boundaries
-    chronological, never invent timestamps, and respond only with the requested JSON.
+    You are the CKNW News Segment Tool. Transcripts are listed as numbered sentences with precise timestamps.
+    Identify where new stories begin so ffmpeg can cut clean clips. Prefer boundaries whenever the host changes
+    topic, introduces a new guest, or transitions with promo phrases like "coming up" or "back after the break".
+    Keep boundaries chronological, never invent timestamps, and respond only with the requested JSON.
   max_stories: 15
   llm_prompt: |
     Review the transcript (numbered sentences) and return up to {{max_clips}} boundary objects where a
@@ -33,15 +36,53 @@ text:
     Requirements:
     - index matches the numbered sentence (1-based) where the story starts.
     - score ranges 0-1 and reflects confidence.
+    - Prefer splitting when the host introduces traffic/weather updates, sponsor reads, or transitional phrases
+      such as "coming up", "after the break", "our next guest", or "let's turn to".
     - Keep boundaries chronological, never duplicate indices, and do not invent timestamps.
+    - If the transcript contains multiple stories, return at least three boundaries when possible.
     - Use the provided timestamps/lines for context; ignore anything not in the transcript.
 
     Transcript:
     {{transcript}}
 heuristics:
-  keyword_patterns:
-    - "(?i)we'll have more on that"
-    - "(?i)back after the break"
-    - "(?i)this is Mike Smith"
-    - "(?i)you're listening to"
-    - "(?i)CKNW"
+  pattern_entries:
+    - pattern: "(?i)coming up"
+      weight: 0.65
+      category: Promo
+      note: Host tease for the next story
+    - pattern: "(?i)after the break"
+      weight: 0.65
+      category: Promo
+      note: Signals a hard break/transition
+    - pattern: "(?i)up next"
+      weight: 0.6
+      category: Promo
+      note: Another teaser phrase
+    - pattern: "(?i)back after the break"
+      weight: 0.6
+      category: Promo
+      note: Returning from commercial block
+    - pattern: "(?i)our next guest"
+      weight: 0.55
+      category: News
+      note: Guest introductions mark new topics
+    - pattern: "(?i)let's turn to"
+      weight: 0.5
+      category: News
+      note: Host explicitly pivots
+    - pattern: "(?i)we'll have more on that"
+      weight: 0.45
+      category: News
+      note: Wrap-up signaling end of story
+    - pattern: "(?i)traffic update"
+      weight: 0.6
+      category: Traffic
+      note: Recurring traffic block
+    - pattern: "(?i)weather update"
+      weight: 0.55
+      category: Weather
+      note: Weather hits are their own segments
+    - pattern: "(?i)you're listening to"
+      weight: 0.45
+      category: Promo
+      note: Station IDs often precede a reset

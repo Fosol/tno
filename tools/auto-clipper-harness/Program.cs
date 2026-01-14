@@ -55,6 +55,13 @@ var options = Options.Create(new AutoClipperOptions
 {
     AzureSpeechKey = RequireEnv("AUTOCLIP_HARNESS_SPEECH_KEY"),
     AzureSpeechRegion = RequireEnv("AUTOCLIP_HARNESS_SPEECH_REGION"),
+    AzureSpeechBatchEndpoint = Environment.GetEnvironmentVariable("AUTOCLIP_HARNESS_BATCH_ENDPOINT") ?? string.Empty,
+    AzureSpeechBatchApiVersion = Environment.GetEnvironmentVariable("AUTOCLIP_HARNESS_BATCH_VERSION") ?? "v3.2",
+    AzureSpeechBatchPollingIntervalSeconds = int.TryParse(Environment.GetEnvironmentVariable("AUTOCLIP_HARNESS_BATCH_POLL_SECONDS"), out var batchPollSeconds) ? batchPollSeconds : 10,
+    AzureSpeechBatchTimeoutMinutes = int.TryParse(Environment.GetEnvironmentVariable("AUTOCLIP_HARNESS_BATCH_TIMEOUT_MINUTES"), out var batchTimeoutMinutes) ? batchTimeoutMinutes : 45,
+    AzureSpeechStorageConnectionString = RequireEnv("AUTOCLIP_HARNESS_STORAGE_CONNECTION_STRING"),
+    AzureSpeechStorageContainer = RequireEnv("AUTOCLIP_HARNESS_STORAGE_CONTAINER"),
+    AzureSpeechStorageSasExpiryMinutes = int.TryParse(Environment.GetEnvironmentVariable("AUTOCLIP_HARNESS_STORAGE_SAS_MINUTES"), out var sasMinutes) ? sasMinutes : 180,
     LlmApiUrl = RequireEnv("AUTOCLIP_HARNESS_LLM_URL"),
     LlmApiKey = RequireEnv("AUTOCLIP_HARNESS_LLM_KEY"),
     LlmDeployment = RequireEnv("AUTOCLIP_HARNESS_LLM_DEPLOYMENT"),
@@ -68,7 +75,7 @@ var options = Options.Create(new AutoClipperOptions
 
 var speechLogger = loggerFactory.CreateLogger<AzureSpeechTranscriptionService>();
 var llmLogger = loggerFactory.CreateLogger<ClipSegmentationService>();
-var speechService = new AzureSpeechTranscriptionService(options, speechLogger);
+var speechService = new AzureSpeechTranscriptionService(new HttpClient(), options, speechLogger);
 var llmService = new ClipSegmentationService(new HttpClient(), options, llmLogger);
 
 var transcriptionRequest = new SpeechTranscriptionRequest
@@ -132,10 +139,30 @@ static string BuildPromptDebug(ClipSegmentationSettings settings, IReadOnlyList<
     builder.AppendLine(settings?.PromptOverride ?? "<none>");
     builder.AppendLine();
     builder.AppendLine("Heuristic Patterns:");
-    builder.AppendLine(settings?.KeywordPatterns != null && settings.KeywordPatterns.Count > 0
-        ? string.Join(", ", settings.KeywordPatterns)
-        : "<none>");
+    if (settings?.HeuristicPatternEntries != null && settings.HeuristicPatternEntries.Count > 0)
+    {
+        foreach (var entry in settings.HeuristicPatternEntries)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(entry.Pattern)) continue;
+            var weight = entry.Weight ?? settings.HeuristicBoundaryWeight ?? 0;
+            var meta = new List<string>();
+            if (weight > 0) meta.Add($"w={weight:0.00}");
+            if (!string.IsNullOrWhiteSpace(entry.Category)) meta.Add($"cat={entry.Category}");
+            if (!string.IsNullOrWhiteSpace(entry.Note)) meta.Add(entry.Note!);
+            var suffix = meta.Count > 0 ? $" ({string.Join(", ", meta)})" : string.Empty;
+            builder.AppendLine($"- {entry.Pattern}{suffix}");
+        }
+    }
+    else if (settings?.KeywordPatterns != null && settings.KeywordPatterns.Count > 0)
+    {
+        builder.AppendLine(string.Join(", ", settings.KeywordPatterns));
+    }
+    else
+    {
+        builder.AppendLine("<none>");
+    }
     builder.AppendLine();
+
     builder.AppendLine("Heuristic Hits:");
     builder.AppendLine(BuildHeuristicHitReport(settings, segments));
     builder.AppendLine();
@@ -159,22 +186,22 @@ static string BuildNumberedTranscript(IReadOnlyList<TimestampedTranscript> segme
 
 static string BuildHeuristicHitReport(ClipSegmentationSettings? settings, IReadOnlyList<TimestampedTranscript> segments)
 {
-    if (settings?.KeywordPatterns == null || settings.KeywordPatterns.Count == 0 || segments == null || segments.Count == 0)
-        return "<none>";
+    if (segments == null || segments.Count == 0) return "<none>";
+    var patterns = ResolveHeuristicPatternDescriptions(settings);
+    if (patterns.Count == 0) return "<none>";
 
     var hits = new List<string>();
-    foreach (var pattern in settings.KeywordPatterns)
+    foreach (var pattern in patterns)
     {
-        if (string.IsNullOrWhiteSpace(pattern)) continue;
         try
         {
-            var regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            var regex = new Regex(pattern.Pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
             for (var i = 0; i < segments.Count; i++)
             {
                 var sentence = segments[i];
                 if (string.IsNullOrWhiteSpace(sentence.Text)) continue;
                 if (regex.IsMatch(sentence.Text))
-                    hits.Add($"Sentence {i + 1} matches pattern '{pattern}'");
+                    hits.Add($"Sentence {i + 1} matches {pattern.Description}");
             }
         }
         catch
@@ -185,7 +212,36 @@ static string BuildHeuristicHitReport(ClipSegmentationSettings? settings, IReadO
 
     return hits.Count == 0 ? "<none>" : string.Join(Environment.NewLine, hits);
 }
+static List<(string Pattern, string Description)> ResolveHeuristicPatternDescriptions(ClipSegmentationSettings? settings)
+{
+    var descriptions = new List<(string Pattern, string Description)>();
+    var entries = settings?.HeuristicPatternEntries;
+    if (entries != null && entries.Count > 0)
+    {
+        var baseWeight = settings?.HeuristicBoundaryWeight ?? 0;
+        foreach (var entry in entries)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(entry.Pattern)) continue;
+            var weight = entry.Weight ?? baseWeight;
+            var meta = new List<string>();
+            if (weight > 0) meta.Add($"w={weight:0.00}");
+            if (!string.IsNullOrWhiteSpace(entry.Category)) meta.Add($"cat={entry.Category}");
+            if (!string.IsNullOrWhiteSpace(entry.Note)) meta.Add(entry.Note!);
+            var description = $"pattern '{entry.Pattern}'";
+            if (meta.Count > 0) description += $" ({string.Join(", ", meta)})";
+            descriptions.Add((entry.Pattern, description));
+        }
+        return descriptions;
+    }
 
+    if (settings?.KeywordPatterns == null || settings.KeywordPatterns.Count == 0) return descriptions;
+    foreach (var pattern in settings.KeywordPatterns)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) continue;
+        descriptions.Add((pattern, $"pattern '{pattern}'"));
+    }
+    return descriptions;
+}
 static string BuildTranscriptDocument(IReadOnlyList<TimestampedTranscript> segments)
 {
     if (segments == null || segments.Count == 0) return string.Empty;
@@ -249,6 +305,16 @@ static ClipSegmentationSettings BuildSegmentationSettings(StationProfile profile
         PromptCharacterLimit = profile.Text.PromptCharacterLimit,
         MaxStories = profile.Text.MaxStories,
         KeywordPatterns = profile.Heuristics.KeywordPatterns?.ToArray(),
+        HeuristicPatternEntries = profile.Heuristics.PatternEntries?
+            .Where(p => p != null && !string.IsNullOrWhiteSpace(p.Pattern))
+            .Select(p => new HeuristicPatternSetting
+            {
+                Pattern = p.Pattern!,
+                Weight = p.Weight,
+                Category = string.IsNullOrWhiteSpace(p.Category) ? null : p.Category,
+                Note = p.Note
+            })
+            .ToArray(),
         HeuristicBoundaryWeight = profile.Text.HeuristicBoundaryWeight,
         KeywordCategories = profile.Text.KeywordCategories?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value)
     };
@@ -294,6 +360,17 @@ static ClipDefinition? NormalizeClipDefinition(ClipDefinition definition, IReadO
 
 static IReadOnlyList<TimestampedTranscript> ExtractTranscriptRange(IReadOnlyList<TimestampedTranscript> segments, TimeSpan start, TimeSpan end)
     => segments.Where(s => s.End > start && s.Start < end).ToArray();
+
+
+
+
+
+
+
+
+
+
+
 
 
 
