@@ -18,34 +18,40 @@ text:
     "(?i)up next": Promo
     "(?i)coming up": Promo
   llm_segmentation: true
-  llm_model: gpt-4o-mini
+  llm_model: gpt-5-chat
   system_prompt: |
-    You are the CKNW News Segment Tool. Transcripts are listed as numbered sentences with precise timestamps.
-    Identify where new stories begin so ffmpeg can cut clean clips. Prefer boundaries whenever the host changes
-    topic, introduces a new guest, or transitions with promo phrases like "coming up" or "back after the break".
-    Keep boundaries chronological, never invent timestamps, and respond only with the requested JSON.
+    You are a Broadcast Structure Parser. Your ONLY job is to detect segment transitions.
+    Output MUST be a single, raw JSON object. 
+    CRITICAL: Start your response with '{' and end with '}'. 
+    DO NOT use markdown, backticks, or "```json" blocks. No introductory or closing text.
   max_stories: 15
   llm_prompt: |
-    Review the transcript (numbered sentences) and return up to {{max_clips}} boundary objects where a
-    new story begins. Output ONLY JSON in this shape:
+    Identify every point in the transcript where the topic or segment type changes.
+    
+    # STRUCTURAL RULES (To Prevent Bundling)
+    1. **The Sign-off Rule**: Phrases like "Global News," "CBC News," or "Reporting live" followed by a name mark the END of a segment. The very next sentence MUST be a new boundary.
+    2. **The Handoff Rule**: When an anchor introduces a reporter (e.g., "As Joshua reports..."), the boundary starts at the ANCHOR'S introduction line.
+    3. **Mandatory Category Split**: News, Traffic, Weather, and Ads MUST be isolated. Never bundle a Traffic report with a News story.
+    4. **Zero Bloating**: Treat every unique headline as a separate clip. If the topic shifts from a shooting to a stabbing, create two distinct boundaries.
+
+    # OUTPUT FORMAT (Raw JSON ONLY)
     {
       "boundaries": [
-        {"index": 12, "title": "slug", "summary": "recap", "score": 0.82}
+        {
+          "index": [Sentence Number],
+          "category": "News | Traffic | Weather | Ad | Promo",
+          "title": "[Short Slug]",
+          "summary": "[One Sentence Recap]",
+          "score": 0.95
+        }
       ]
     }
-    Requirements:
-    - index matches the numbered sentence (1-based) where the story starts.
-    - score ranges 0-1 and reflects confidence.
-    - Prefer splitting when the host introduces traffic/weather updates, sponsor reads, or transitional phrases
-      such as "coming up", "after the break", "our next guest", or "let's turn to".
-    - Keep boundaries chronological, never duplicate indices, and do not invent timestamps.
-    - If the transcript contains multiple stories, return at least three boundaries when possible.
-    - Use the provided timestamps/lines for context; ignore anything not in the transcript.
 
     Transcript:
     {{transcript}}
 heuristics:
   pattern_entries:
+    # --- Existing Patterns ---
     - pattern: "(?i)coming up"
       weight: 0.65
       category: Promo
@@ -54,26 +60,22 @@ heuristics:
       weight: 0.65
       category: Promo
       note: Signals a hard break/transition
-    - pattern: "(?i)up next"
-      weight: 0.6
-      category: Promo
-      note: Another teaser phrase
-    - pattern: "(?i)back after the break"
-      weight: 0.6
-      category: Promo
-      note: Returning from commercial block
-    - pattern: "(?i)our next guest"
-      weight: 0.55
+    
+    # --- New Anchor-Specific Patterns ---
+    - pattern: "(?i)Ian Wilson"
+      weight: 0.85
+      category: Traffic
+      note: Mandatory Traffic anchor introduction
+    - pattern: "(?i)Mark Madryga"
+      weight: 0.85
+      category: Weather
+      note: Mandatory Weather anchor introduction
+    - pattern: "(?i)John Straight"
+      weight: 0.60
       category: News
-      note: Guest introductions mark new topics
-    - pattern: "(?i)let's turn to"
-      weight: 0.5
-      category: News
-      note: Host explicitly pivots
-    - pattern: "(?i)we'll have more on that"
-      weight: 0.45
-      category: News
-      note: Wrap-up signaling end of story
+      note: Primary News anchor reset
+      
+    # --- Service Cues ---
     - pattern: "(?i)traffic update"
       weight: 0.6
       category: Traffic
@@ -82,7 +84,3 @@ heuristics:
       weight: 0.55
       category: Weather
       note: Weather hits are their own segments
-    - pattern: "(?i)you're listening to"
-      weight: 0.45
-      category: Promo
-      note: Station IDs often precede a reset
