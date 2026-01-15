@@ -24,7 +24,6 @@ public class AutoClipperOptions : ServiceOptions
     public int AzureSpeechMaxRetries { get; set; } = 3;
     public int AzureSpeechRetryDelaySeconds { get; set; } = 5;
 
-
     public string LlmApiUrl { get; set; } = "";
     public string LlmApiKey { get; set; } = "";
     public string LlmModel { get; set; } = "";

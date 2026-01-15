@@ -66,4 +66,3 @@ public class AutoClipperService : KafkaConsumerService
     }
     #endregion
 }
-
